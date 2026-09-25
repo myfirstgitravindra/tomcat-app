@@ -1,21 +1,42 @@
-name: Build and Deploy to ACR + VM
+name: Build and Deploy
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      # 1. Get code
+      - uses: actions/checkout@v4
 
-      - name: ACR Login
+      # 2. Login to ACR
+      - name: Login
         run: |
-          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login \
+            ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
-      - name: Build and push image
+      # 3. Build + push with run number as tag
+      - name: Build and Push
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.sha }} .
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.sha }}
+          IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+      # 4. SSH to VM and run the new image
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            echo "${{ secrets.ACR_PASSWORD }}" | docker login \
+              ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
+            docker stop tomcat-app || true
+            docker rm tomcat-app || true
+            docker run -d --name tomcat-app -p 8080:8080 \
+              ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
