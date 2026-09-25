@@ -10,3 +10,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Build and push image
+        run: |
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.sha }} .
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.sha }}
