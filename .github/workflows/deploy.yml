@@ -11,6 +11,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: ACR Login
+        run: |
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
       - name: Build and push image
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.sha }} .
