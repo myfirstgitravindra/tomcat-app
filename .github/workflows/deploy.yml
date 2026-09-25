@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build and Deploy to VM
 
 on:
   push:
@@ -10,22 +10,25 @@ jobs:
 
     steps:
       # 1. Get code
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       # 2. Login to ACR
-      - name: Login
+      - name: Login to ACR
         run: |
           echo "${{ secrets.ACR_PASSWORD }}" | docker login \
-            ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+            ${{ secrets.ACR_LOGIN_SERVER }} \
+            -u ${{ secrets.ACR_USERNAME }} \
+            --password-stdin
 
-      # 3. Build + push with run number as tag
+      # 3. Build and push with run number as tag
       - name: Build and Push
         run: |
           IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
           docker build -t $IMAGE .
           docker push $IMAGE
 
-      # 4. SSH to VM and run the new image
+      # 4. SSH to VM, clean port 8080, and run new image
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -33,10 +36,32 @@ jobs:
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
+            set -e
+
+            # Login to ACR on the VM
             echo "${{ secrets.ACR_PASSWORD }}" | docker login \
-              ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+              ${{ secrets.ACR_LOGIN_SERVER }} \
+              -u ${{ secrets.ACR_USERNAME }} \
+              --password-stdin
+
+            # Pull the new image
             docker pull ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
-            docker stop tomcat-app || true
-            docker rm tomcat-app || true
-            docker run -d --name tomcat-app -p 8080:8080 \
+
+            # --- CLEANUP: free up port 8080 ---
+            # Stop & remove container named tomcat-app (if it exists)
+            docker stop tomcat-app 2>/dev/null || true
+            docker rm   tomcat-app 2>/dev/null || true
+
+            # Stop & remove ANY container publishing port 8080
+            docker ps -q --filter "publish=8080" | xargs -r docker stop
+            docker ps -aq --filter "publish=8080" | xargs -r docker rm
+
+            # --- RUN new container ---
+            docker run -d \
+              --name tomcat-app \
+              -p 8080:8080 \
+              --restart unless-stopped \
               ${{ secrets.ACR_LOGIN_SERVER }}/tomcat-app:${{ github.run_number }}
+
+            # Show what's running (nice for logs)
+            docker ps --filter "name=tomcat-app"
